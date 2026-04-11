@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 전역 CSS 변수 */
+:root {
+  --primary: #1B4965;
+  --accent: #FF6B35;
+  --recording: #EF4444;
+}
+
+/* 다크모드 변수 */
+.dark {
+  --primary: #5BA4CF;
+  --accent: #FF8A5C;
+}
+
+/* 스크롤바 최소화 (모바일) */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+/* 번역 텍스트 반응형 크기 */
+.translation-text {
+  font-size: clamp(1.25rem, 4vw, 2.5rem);
+  line-height: 1.5;
+}
+
+/* Safe area 지원 (노치 대응) */
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+}
+
+/* 모바일 터치 최적화 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 텍스트 선택 방지 (버튼 등) */
+button, [role="switch"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* iOS standalone 모드 상태바 영역 */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* PWA standalone 모드에서 바운스 스크롤 방지 */
+@media (display-mode: standalone) {
+  html, body {
+    overscroll-behavior: none;
+  }
+}
