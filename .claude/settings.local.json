@@ -9,7 +9,45 @@
       "mcp__Claude_Preview__preview_start",
       "Bash(npm run:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(gh repo:*)",
+      "Bash(where gh:*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(python -m json.tool)",
+      "Bash(git config:*)",
+      "Bash(git remote:*)",
+      "Bash(git branch:*)",
+      "Bash(npx -y github-create-repo)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.github.com/repos/eunice-101/AcaLingua)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"C:/Users/10_17/Desktop/AcaLingua\" && if git remote -v 2>/dev/null | grep -q origin && [ -n \"$(git status --porcelain 2>/dev/null)\" ]; then git add -A && git commit -m \"auto-save: session checkpoint\" && git push origin HEAD 2>/dev/null || true; fi",
+            "timeout": 30,
+            "statusMessage": "GitHub에 자동 저장 중..."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"C:/Users/10_17/Desktop/AcaLingua\" && if git remote -v 2>/dev/null | grep -q origin && [ -n \"$(git status --porcelain 2>/dev/null)\" ]; then git add -A && git commit -m \"auto-save: pre-compact checkpoint\" && git push origin HEAD 2>/dev/null || true; fi",
+            "timeout": 30,
+            "statusMessage": "컴팩트 전 GitHub에 자동 저장 중..."
+          }
+        ]
+      }
     ]
   }
 }
