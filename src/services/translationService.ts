@@ -44,7 +44,7 @@ class DeepLProvider implements TranslationProvider {
     }
 
     const data = await res.json();
-    return { translatedText: data.translatedText };
+    return { translatedText: data.translatedText ?? data.text ?? '' };
   }
 }
 
@@ -76,7 +76,7 @@ class GoogleProvider implements TranslationProvider {
     }
 
     const data = await res.json();
-    return { translatedText: data.translatedText };
+    return { translatedText: data.translatedText ?? '' };
   }
 }
 

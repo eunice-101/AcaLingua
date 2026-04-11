@@ -39,10 +39,14 @@ export interface ConversationEntry {
   translatedText: string;
 }
 
+/** TTS 음성 성별 */
+export type TtsGender = 'any' | 'male' | 'female';
+
 /** 앱 설정 */
 export interface AppSettings {
   ttsRate: number;
   ttsVolume: number;
+  ttsGender: TtsGender;
   fontSize: FontSizeLevel;
   darkMode: boolean;
   wakeLock: boolean;

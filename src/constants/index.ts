@@ -31,6 +31,7 @@ export const LANGUAGE_LIST: Language[] = Object.values(LANGUAGES);
 export const DEFAULT_SETTINGS: AppSettings = {
   ttsRate: 1.0,
   ttsVolume: 1.0,
+  ttsGender: 'any',
   fontSize: 'medium',
   darkMode: false,
   wakeLock: true,

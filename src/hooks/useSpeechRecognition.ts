@@ -58,6 +58,7 @@ export function useSpeechRecognition({ onFinalResult }: UseSpeechRecognitionOpti
 
       for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
+        if (!result || result.length === 0) continue; // 빈 결과 건너뛰기
         if (result.isFinal) {
           final += result[0].transcript;
         } else {

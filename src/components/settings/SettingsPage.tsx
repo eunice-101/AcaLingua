@@ -2,7 +2,7 @@
  * 설정 페이지 — TTS, 글자 크기, 다크모드, 화면 꺼짐 방지, 연속 인식, API 키
  */
 import { useAppStore } from '@/stores/useAppStore';
-import type { FontSizeLevel, TranslationEngine } from '@/types';
+import type { FontSizeLevel, TranslationEngine, TtsGender } from '@/types';
 
 /** 슬라이더 설정 항목 */
 function SliderSetting({
@@ -88,6 +88,30 @@ export default function SettingsPage() {
           onChange={(v) => updateSettings({ ttsVolume: v })}
           display={`${Math.round(settings.ttsVolume * 100)}%`}
         />
+        <div className="space-y-1">
+          <span className="text-sm text-gray-700 dark:text-gray-300">음성 성별</span>
+          <div className="flex gap-2">
+            {([
+              { value: 'any' as TtsGender, label: '자동' },
+              { value: 'female' as TtsGender, label: '여성' },
+              { value: 'male' as TtsGender, label: '남성' },
+            ]).map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => updateSettings({ ttsGender: opt.value })}
+                aria-label={`음성 성별: ${opt.label}`}
+                className={`flex-1 py-1.5 text-xs rounded-lg border transition-colors ${
+                  settings.ttsGender === opt.value
+                    ? 'border-primary bg-primary/10 text-primary dark:border-accent dark:bg-accent/10 dark:text-accent font-semibold'
+                    : 'border-gray-200 dark:border-gray-700 text-gray-500'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-400">브라우저에 따라 선택 가능한 음성이 다릅니다</p>
+        </div>
       </section>
 
       {/* 화면 */}
