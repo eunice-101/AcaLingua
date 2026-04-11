@@ -31,9 +31,12 @@ export function useSpeechRecognition({ onFinalResult }: UseSpeechRecognitionOpti
 
   /** 현재 입력 언어 (모드에 따라 다름) */
   const currentMode = useAppStore((s) => s.currentMode);
+  const autoDirection = useAppStore((s) => s.autoDirection);
   const sourceLang = useAppStore((s) => s.sourceLang);
   const targetLang = useAppStore((s) => s.targetLang);
-  const inputLang = currentMode === 'listen' ? sourceLang : targetLang;
+  // auto 모드에서는 autoDirection을 따름
+  const effectiveMode = currentMode === 'auto' ? autoDirection : currentMode;
+  const inputLang = effectiveMode === 'listen' ? sourceLang : targetLang;
 
   /** 인식 시작 */
   const start = useCallback(() => {
@@ -119,6 +122,27 @@ export function useSpeechRecognition({ onFinalResult }: UseSpeechRecognitionOpti
       start();
     }
   }, [isRecording, start, stop]);
+
+  /** auto 모드에서 방향 전환 시 인식 언어 변경을 위해 재시작 */
+  const prevInputLangRef = useRef(inputLang);
+  useEffect(() => {
+    if (prevInputLangRef.current !== inputLang && isRecording) {
+      // 현재 인식 중지 후 새 언어로 재시작
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      // 약간의 딜레이 후 재시작 (브라우저 안정성)
+      const timer = setTimeout(() => {
+        if (useAppStore.getState().isRecording || useAppStore.getState().currentMode === 'auto') {
+          start();
+        }
+      }, 300);
+      prevInputLangRef.current = inputLang;
+      return () => clearTimeout(timer);
+    }
+    prevInputLangRef.current = inputLang;
+  }, [inputLang, isRecording, start]);
 
   /** 컴포넌트 언마운트 시 정리 */
   useEffect(() => {

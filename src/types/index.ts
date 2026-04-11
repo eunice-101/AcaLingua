@@ -17,7 +17,10 @@ export interface Language {
 }
 
 /** 통역 모드 */
-export type InterpreterMode = 'listen' | 'speak';
+export type InterpreterMode = 'listen' | 'speak' | 'auto';
+
+/** 자동 모드 내부 방향 (listen/speak 교대) */
+export type AutoDirection = 'listen' | 'speak';
 
 /** 출력 모드 */
 export type OutputMode = 'screen' | 'audio' | 'both';
@@ -32,7 +35,7 @@ export type TranslationEngine = 'deepl' | 'google' | 'auto';
 export interface ConversationEntry {
   id: string;
   timestamp: number;
-  mode: InterpreterMode;
+  mode: AutoDirection;  // 실제 번역 방향 (listen 또는 speak)
   sourceLang: LanguageCode;
   targetLang: LanguageCode;
   originalText: string;

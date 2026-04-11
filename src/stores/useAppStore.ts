@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   InterpreterMode,
+  AutoDirection,
   OutputMode,
   LanguageCode,
   ConversationEntry,
@@ -13,6 +14,8 @@ import { DEFAULT_SETTINGS, STORAGE_KEYS } from '@/constants';
 interface AppState {
   /* ── 통역 상태 ── */
   currentMode: InterpreterMode;
+  autoDirection: AutoDirection;   // auto 모드에서 현재 방향
+  isTranslating: boolean;         // 번역 중 로딩 표시
   outputMode: OutputMode;
   sourceLang: LanguageCode;
   targetLang: LanguageCode;
@@ -32,6 +35,9 @@ interface AppState {
 
   /* ── 액션 ── */
   setMode: (mode: InterpreterMode) => void;
+  setAutoDirection: (dir: AutoDirection) => void;
+  toggleAutoDirection: () => void;
+  setTranslating: (val: boolean) => void;
   setOutputMode: (mode: OutputMode) => void;
   setSourceLang: (lang: LanguageCode) => void;
   setTargetLang: (lang: LanguageCode) => void;
@@ -52,6 +58,8 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       /* 초기값 */
       currentMode: 'listen',
+      autoDirection: 'listen',
+      isTranslating: false,
       outputMode: 'both',
       sourceLang: 'en',
       targetLang: 'ko',
@@ -64,7 +72,17 @@ export const useAppStore = create<AppState>()(
       error: null,
 
       /* 액션 */
-      setMode: (mode) => set({ currentMode: mode, transcript: '', interimTranscript: '', translation: '' }),
+      setMode: (mode) => set({
+        currentMode: mode,
+        autoDirection: mode === 'auto' ? 'listen' : (mode as AutoDirection),
+        transcript: '', interimTranscript: '', translation: '',
+      }),
+      setAutoDirection: (dir) => set({ autoDirection: dir }),
+      toggleAutoDirection: () => set((s) => ({
+        autoDirection: s.autoDirection === 'listen' ? 'speak' : 'listen',
+        transcript: '', interimTranscript: '', translation: '',
+      })),
+      setTranslating: (val) => set({ isTranslating: val }),
       setOutputMode: (mode) => set({ outputMode: mode }),
       setSourceLang: (lang) => set({ sourceLang: lang }),
       setTargetLang: (lang) => set({ targetLang: lang }),
