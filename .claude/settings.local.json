@@ -25,7 +25,8 @@
       "Bash(find /c/Users/10_17/Desktop/AcaLingua -path */api/*.ts -o -path */api/*.js)",
       "WebSearch",
       "PowerShell(Remove-Item \"C:\\\\Users\\\\10_17\\\\Desktop\\\\AcaLingua\\\\api\\\\paper-translate.ts\" -Confirm:$false)",
-      "PowerShell($url = \"https://ollama.com/download/OllamaSetup.exe\"; $out = \"$env:USERPROFILE\\\\Downloads\\\\OllamaSetup.exe\"; Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing; \"Downloaded to $out, size: $\\(\\(Get-Item $out\\).Length / 1MB\\) MB\")"
+      "PowerShell($url = \"https://ollama.com/download/OllamaSetup.exe\"; $out = \"$env:USERPROFILE\\\\Downloads\\\\OllamaSetup.exe\"; Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing; \"Downloaded to $out, size: $\\(\\(Get-Item $out\\).Length / 1MB\\) MB\")",
+      "PowerShell(irm https://ollama.com/install.ps1 | iex)"
     ]
   },
   "hooks": {
