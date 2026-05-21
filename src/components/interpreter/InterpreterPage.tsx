@@ -77,14 +77,13 @@ export default function InterpreterPage() {
 
         // auto 모드: 번역 완료 후 방향 전환
         if (mode === 'auto') {
-          // TTS가 끝난 후 방향 전환하도록 약간의 딜레이
-          // (speak 함수는 비동기지만 speechSynthesis는 완료 콜백이 불안정하므로 타이머 사용)
+          // TTS 재생 시간 추정 (글자 수 기반) 후 방향 전환
           const estimatedTTSMs = Math.max(translatedText.length * 80, 1500);
           setTimeout(() => {
             if (!mountedRef.current) return;
             const latest = useAppStore.getState();
-            // 아직 auto 모드이고 녹음 중이면 방향 전환
-            if (latest.currentMode === 'auto') {
+            // 아직 auto 모드이고 사용자가 녹음을 중지하지 않은 경우만 전환
+            if (latest.currentMode === 'auto' && (latest.isRecording || latest.autoDirection !== effectiveDir)) {
               latest.toggleAutoDirection();
             }
           }, estimatedTTSMs);

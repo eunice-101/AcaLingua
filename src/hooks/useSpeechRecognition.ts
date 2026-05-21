@@ -1,6 +1,7 @@
 /**
  * 음성 인식 훅 — Web Speech API (SpeechRecognition) 래퍼
  * continuous + interimResults 모드로 실시간 음성인식 제공
+ * auto 모드 방향 전환 시 인식 언어 자동 전환 (switchingLangRef 플래그로 안전 처리)
  */
 import { useRef, useCallback, useEffect } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
@@ -28,6 +29,9 @@ export function useSpeechRecognition({ onFinalResult }: UseSpeechRecognitionOpti
   const setTranscript = useAppStore((s) => s.setTranscript);
   const setInterimTranscript = useAppStore((s) => s.setInterimTranscript);
   const settings = useAppStore((s) => s.settings);
+
+  /** 언어 전환 중 플래그 — onend에서 재시작 방지용 */
+  const switchingLangRef = useRef(false);
 
   /** 현재 입력 언어 (모드에 따라 다름) */
   const currentMode = useAppStore((s) => s.currentMode);
@@ -86,6 +90,10 @@ export function useSpeechRecognition({ onFinalResult }: UseSpeechRecognitionOpti
     };
 
     recognition.onend = () => {
+      // 언어 전환 중이면 재시작하지 않음 (effect에서 새 인식기를 시작함)
+      if (switchingLangRef.current) {
+        return;
+      }
       // 연속 인식 모드이고 아직 녹음 중이면 자동 재시작
       if (useAppStore.getState().isRecording && useAppStore.getState().settings.continuousMode) {
         try {
@@ -123,23 +131,33 @@ export function useSpeechRecognition({ onFinalResult }: UseSpeechRecognitionOpti
     }
   }, [isRecording, start, stop]);
 
-  /** auto 모드에서 방향 전환 시 인식 언어 변경을 위해 재시작 */
+  /** auto 모드에서 방향 전환 시 인식 언어 변경을 위해 안전하게 재시작 */
   const prevInputLangRef = useRef(inputLang);
   useEffect(() => {
     if (prevInputLangRef.current !== inputLang && isRecording) {
-      // 현재 인식 중지 후 새 언어로 재시작
+      // 1. onend에서 이전 인식기 재시작 방지
+      switchingLangRef.current = true;
+
+      // 2. 이전 인식기 중지
       if (recognitionRef.current) {
         recognitionRef.current.stop();
         recognitionRef.current = null;
       }
-      // 약간의 딜레이 후 재시작 (브라우저 안정성)
+
+      // 3. 약간의 딜레이 후 새 언어로 재시작 (브라우저 안정성)
       const timer = setTimeout(() => {
-        if (useAppStore.getState().isRecording || useAppStore.getState().currentMode === 'auto') {
+        switchingLangRef.current = false;
+        // isRecording은 여전히 true (사용자가 중지하지 않은 한)
+        if (useAppStore.getState().isRecording) {
           start();
         }
       }, 300);
+
       prevInputLangRef.current = inputLang;
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        switchingLangRef.current = false;
+      };
     }
     prevInputLangRef.current = inputLang;
   }, [inputLang, isRecording, start]);
