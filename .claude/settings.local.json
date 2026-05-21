@@ -27,7 +27,8 @@
       "PowerShell(Remove-Item \"C:\\\\Users\\\\10_17\\\\Desktop\\\\AcaLingua\\\\api\\\\paper-translate.ts\" -Confirm:$false)",
       "PowerShell($url = \"https://ollama.com/download/OllamaSetup.exe\"; $out = \"$env:USERPROFILE\\\\Downloads\\\\OllamaSetup.exe\"; Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing; \"Downloaded to $out, size: $\\(\\(Get-Item $out\\).Length / 1MB\\) MB\")",
       "PowerShell(irm https://ollama.com/install.ps1 | iex)",
-      "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://localhost:11434/api/tags\" -Method Get; \"Running. Models: $\\(\\($r.models | ForEach-Object { $_.name }\\) -join ', '\\)\" } catch { \"Not running: $\\($_.Exception.Message\\)\" })"
+      "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://localhost:11434/api/tags\" -Method Get; \"Running. Models: $\\(\\($r.models | ForEach-Object { $_.name }\\) -join ', '\\)\" } catch { \"Not running: $\\($_.Exception.Message\\)\" })",
+      "mcp__Claude_in_Chrome__tabs_context_mcp"
     ]
   },
   "hooks": {
