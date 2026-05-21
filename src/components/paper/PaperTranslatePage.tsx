@@ -1,7 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
 import { usePaperStore } from '@/stores/usePaperStore';
 import type { AcademicField, AcademicTone, PaperSection } from '@/types';
-import { splitIntoSections, translatePaperSection, checkOllamaStatus, generateStudyNote } from '@/services/paperTranslationService';
+import {
+  splitIntoSections,
+  translateWithRetry,
+  chunkLongText,
+  checkOllamaStatus,
+  generateStudyNote,
+} from '@/services/paperTranslationService';
 import { generateId } from '@/utils/uuid';
 import GlossaryEditor from './GlossaryEditor';
 import TranslationResult from './TranslationResult';
@@ -21,8 +27,16 @@ const FIELD_OPTIONS: { value: AcademicField; label: string }[] = [
 ];
 
 const TONE_OPTIONS: { value: AcademicTone; label: string; desc: string }[] = [
-  { value: 'accessible', label: '명료 학술체', desc: '국제학회 발표에 적합한 명확하고 읽기 쉬운 학술 영어' },
-  { value: 'formal', label: '격식 학술체', desc: '저널 투고에 적합한 격식 있는 전문 학술 영어' },
+  {
+    value: 'accessible',
+    label: '명료 학술체',
+    desc: '국제학회 발표에 적합한 명확하고 읽기 쉬운 학술 영어',
+  },
+  {
+    value: 'formal',
+    label: '격식 학술체',
+    desc: '저널 투고에 적합한 격식 있는 전문 학술 영어',
+  },
 ];
 
 type TabView = 'input' | 'result' | 'history';
@@ -32,16 +46,19 @@ export default function PaperTranslatePage() {
     inputText, setInputText,
     field, setField,
     tone, setTone,
-    sections, setSections, updateSection,
+    sections, setSections, updateSection, editSectionTranslation,
     glossary,
     isTranslating, setTranslating,
     progress, setProgress,
     error, setError,
     saveToHistory, clearAll,
     ollamaModel, setOllamaModel,
+    setAbortController, cancelTranslation,
   } = usePaperStore();
 
-  const [activeTab, setActiveTab] = useState<TabView>(sections.length > 0 ? 'result' : 'input');
+  const [activeTab, setActiveTab] = useState<TabView>(
+    sections.length > 0 ? 'result' : 'input',
+  );
   const [showGlossary, setShowGlossary] = useState(false);
   const [ollamaRunning, setOllamaRunning] = useState<boolean | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
@@ -51,27 +68,31 @@ export default function PaperTranslatePage() {
     checkOllamaStatus().then(({ running, models }) => {
       setOllamaRunning(running);
       setAvailableModels(models);
-      // 현재 선택된 모델이 목록에 없으면 첫 번째 모델로 변경
       if (running && models.length > 0 && !models.includes(ollamaModel)) {
         setOllamaModel(models[0]);
       }
     });
   }, []);
 
+  /* ─── 스트리밍 번역 + 청크 분할 ─── */
   const handleTranslate = useCallback(async () => {
     if (!inputText.trim()) {
       setError('번역할 논문 텍스트를 입력해주세요.');
       return;
     }
 
-    // Ollama 연결 재확인
     const { running } = await checkOllamaStatus();
     if (!running) {
-      setError('Ollama가 실행되고 있지 않습니다. 터미널에서 "ollama serve"를 실행해주세요.');
+      setError(
+        'Ollama가 실행되고 있지 않습니다. 터미널에서 "ollama serve"를 실행해주세요.',
+      );
       setOllamaRunning(false);
       return;
     }
 
+    // AbortController 생성
+    const controller = new AbortController();
+    setAbortController(controller);
     setError(null);
     setTranslating(true);
     setProgress(0);
@@ -82,27 +103,75 @@ export default function PaperTranslatePage() {
       type: s.type,
       original: s.text,
       translated: '',
-      status: 'pending',
+      status: 'pending' as const,
     }));
 
     setSections(paperSections);
     setActiveTab('result');
 
     for (let i = 0; i < paperSections.length; i++) {
+      // 취소 체크
+      if (controller.signal.aborted) break;
+
       const sec = paperSections[i];
       updateSection(sec.id, { status: 'translating' });
 
       try {
-        const result = await translatePaperSection(
-          { text: sec.original, sectionType: sec.type, field, tone, glossary },
-          ollamaModel,
-        );
-        updateSection(sec.id, {
-          translated: result.translatedText,
-          status: 'done',
-        });
+        const chunks = chunkLongText(sec.original);
+
+        if (chunks.length === 1) {
+          // 단일 청크 — 직접 스트리밍
+          await translateWithRetry(
+            {
+              text: sec.original,
+              sectionType: sec.type,
+              field,
+              tone,
+              glossary,
+            },
+            ollamaModel,
+            (fullText) => updateSection(sec.id, { translated: fullText }),
+            controller.signal,
+          );
+        } else {
+          // 다중 청크 — 순차 스트리밍 + 누적
+          let completedText = '';
+
+          for (let c = 0; c < chunks.length; c++) {
+            if (controller.signal.aborted) break;
+
+            const prefix = completedText;
+            const result = await translateWithRetry(
+              {
+                text: chunks[c],
+                sectionType: sec.type,
+                field,
+                tone,
+                glossary,
+              },
+              ollamaModel,
+              (currentChunkText) => {
+                const display =
+                  prefix +
+                  (prefix ? '\n\n' : '') +
+                  currentChunkText;
+                updateSection(sec.id, { translated: display });
+              },
+              controller.signal,
+            );
+
+            completedText =
+              prefix +
+              (prefix ? '\n\n' : '') +
+              result.translatedText;
+          }
+        }
+
+        updateSection(sec.id, { status: 'done' });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Translation failed';
+        if (controller.signal.aborted) break;
+        const msg =
+          err instanceof Error ? err.message : 'Translation failed';
         updateSection(sec.id, { status: 'error', error: msg });
       }
 
@@ -110,26 +179,52 @@ export default function PaperTranslatePage() {
     }
 
     setTranslating(false);
-    saveToHistory();
-  }, [inputText, field, tone, glossary, ollamaModel, setError, setTranslating, setProgress, setSections, updateSection, saveToHistory]);
+    setAbortController(null);
 
-  const handleRetrySection = useCallback(async (sectionId: string) => {
-    const sec = usePaperStore.getState().sections.find((s) => s.id === sectionId);
-    if (!sec) return;
-
-    updateSection(sectionId, { status: 'translating', error: undefined });
-
-    try {
-      const result = await translatePaperSection(
-        { text: sec.original, sectionType: sec.type, field, tone, glossary },
-        ollamaModel,
-      );
-      updateSection(sectionId, { translated: result.translatedText, status: 'done' });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Retry failed';
-      updateSection(sectionId, { status: 'error', error: msg });
+    if (!controller.signal.aborted) {
+      saveToHistory();
     }
-  }, [field, tone, glossary, ollamaModel, updateSection]);
+  }, [
+    inputText, field, tone, glossary, ollamaModel,
+    setError, setTranslating, setProgress, setSections, updateSection,
+    saveToHistory, setAbortController,
+  ]);
+
+  /* ─── 섹션 재시도 (스트리밍) ─── */
+  const handleRetrySection = useCallback(
+    async (sectionId: string) => {
+      const sec = usePaperStore
+        .getState()
+        .sections.find((s) => s.id === sectionId);
+      if (!sec) return;
+
+      updateSection(sectionId, {
+        status: 'translating',
+        error: undefined,
+        translated: '',
+      });
+
+      try {
+        await translateWithRetry(
+          {
+            text: sec.original,
+            sectionType: sec.type,
+            field,
+            tone,
+            glossary,
+          },
+          ollamaModel,
+          (fullText) =>
+            updateSection(sectionId, { translated: fullText }),
+        );
+        updateSection(sectionId, { status: 'done' });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Retry failed';
+        updateSection(sectionId, { status: 'error', error: msg });
+      }
+    },
+    [field, tone, glossary, ollamaModel, updateSection],
+  );
 
   const handleCopyAll = useCallback(() => {
     const text = sections
@@ -139,19 +234,29 @@ export default function PaperTranslatePage() {
     navigator.clipboard.writeText(text);
   }, [sections]);
 
-  const handleRequestStudy = useCallback(async (sectionId: string) => {
-    const sec = usePaperStore.getState().sections.find((s) => s.id === sectionId);
-    if (!sec || sec.status !== 'done' || sec.studyStatus === 'loading') return;
+  const handleRequestStudy = useCallback(
+    async (sectionId: string) => {
+      const sec = usePaperStore
+        .getState()
+        .sections.find((s) => s.id === sectionId);
+      if (!sec || sec.status !== 'done' || sec.studyStatus === 'loading')
+        return;
 
-    updateSection(sectionId, { studyStatus: 'loading' });
+      updateSection(sectionId, { studyStatus: 'loading' });
 
-    try {
-      const note = await generateStudyNote(sec.translated, sec.original, ollamaModel);
-      updateSection(sectionId, { studyNote: note, studyStatus: 'done' });
-    } catch {
-      updateSection(sectionId, { studyStatus: 'error' });
-    }
-  }, [ollamaModel, updateSection]);
+      try {
+        const note = await generateStudyNote(
+          sec.translated,
+          sec.original,
+          ollamaModel,
+        );
+        updateSection(sectionId, { studyNote: note, studyStatus: 'done' });
+      } catch {
+        updateSection(sectionId, { studyStatus: 'error' });
+      }
+    },
+    [ollamaModel, updateSection],
+  );
 
   const handleRefreshOllama = useCallback(async () => {
     const { running, models } = await checkOllamaStatus();
@@ -166,11 +271,16 @@ export default function PaperTranslatePage() {
     <div className="px-4 py-4 max-w-2xl mx-auto space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-200">논문 번역</h2>
+        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-200">
+          논문 번역
+        </h2>
         <div className="flex items-center gap-2">
           {sections.length > 0 && (
             <button
-              onClick={() => { clearAll(); setActiveTab('input'); }}
+              onClick={() => {
+                clearAll();
+                setActiveTab('input');
+              }}
               className="text-xs text-gray-400 hover:text-red-500 transition-colors"
             >
               초기화
@@ -180,17 +290,25 @@ export default function PaperTranslatePage() {
       </div>
 
       {/* Ollama Status */}
-      <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs ${
-        ollamaRunning === null
-          ? 'bg-gray-100 dark:bg-gray-800 text-gray-500'
-          : ollamaRunning
-            ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
-            : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
-      }`}>
+      <div
+        className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs ${
+          ollamaRunning === null
+            ? 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+            : ollamaRunning
+              ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
+              : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
+        }`}
+      >
         <div className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${
-            ollamaRunning === null ? 'bg-gray-400 animate-pulse' : ollamaRunning ? 'bg-green-500' : 'bg-red-500'
-          }`} />
+          <span
+            className={`w-2 h-2 rounded-full ${
+              ollamaRunning === null
+                ? 'bg-gray-400 animate-pulse'
+                : ollamaRunning
+                  ? 'bg-green-500'
+                  : 'bg-red-500'
+            }`}
+          />
           {ollamaRunning === null && 'Ollama 연결 확인 중...'}
           {ollamaRunning === true && (
             <span>
@@ -202,7 +320,9 @@ export default function PaperTranslatePage() {
                   className="ml-1 px-1.5 py-0.5 rounded border border-green-300 dark:border-green-700 bg-transparent font-medium"
                 >
                   {availableModels.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
                   ))}
                 </select>
               ) : (
@@ -212,24 +332,48 @@ export default function PaperTranslatePage() {
           )}
           {ollamaRunning === false && (
             <span>
-              Ollama 미연결 — 터미널에서 <code className="px-1 py-0.5 bg-red-100 dark:bg-red-900/40 rounded font-mono">ollama serve</code> 실행 필요
+              Ollama 미연결 — 터미널에서{' '}
+              <code className="px-1 py-0.5 bg-red-100 dark:bg-red-900/40 rounded font-mono">
+                ollama serve
+              </code>{' '}
+              실행 필요
             </span>
           )}
         </div>
-        <button onClick={handleRefreshOllama} className="hover:opacity-70" title="새로고침">
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        <button
+          onClick={handleRefreshOllama}
+          className="hover:opacity-70"
+          title="새로고침"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="w-3.5 h-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
           </svg>
         </button>
       </div>
 
       {/* Tab Navigation */}
       <div className="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
-        {([
-          { key: 'input' as TabView, label: '입력' },
-          { key: 'result' as TabView, label: `결과${completedCount > 0 ? ` (${completedCount})` : ''}` },
-          { key: 'history' as TabView, label: '기록' },
-        ]).map((tab) => (
+        {(
+          [
+            { key: 'input' as TabView, label: '입력' },
+            {
+              key: 'result' as TabView,
+              label: `결과${completedCount > 0 ? ` (${completedCount})` : ''}`,
+            },
+            { key: 'history' as TabView, label: '기록' },
+          ] as const
+        ).map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -257,26 +401,38 @@ export default function PaperTranslatePage() {
           {/* Field & Tone */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">학문 분야</label>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                학문 분야
+              </label>
               <select
                 value={field}
-                onChange={(e) => setField(e.target.value as AcademicField)}
+                onChange={(e) =>
+                  setField(e.target.value as AcademicField)
+                }
                 className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
               >
                 {FIELD_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">번역 톤</label>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                번역 톤
+              </label>
               <select
                 value={tone}
-                onChange={(e) => setTone(e.target.value as AcademicTone)}
+                onChange={(e) =>
+                  setTone(e.target.value as AcademicTone)
+                }
                 className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
               >
                 {TONE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -292,12 +448,36 @@ export default function PaperTranslatePage() {
             onClick={() => setShowGlossary(!showGlossary)}
             className="flex items-center gap-1.5 text-xs text-primary dark:text-accent hover:underline"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
             </svg>
-            용어 사전 {Object.keys(usePaperStore.getState().glossary).length > 0 && `(${Object.keys(usePaperStore.getState().glossary).length})`}
-            <svg xmlns="http://www.w3.org/2000/svg" className={`w-3 h-3 transition-transform ${showGlossary ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            용어 사전{' '}
+            {Object.keys(usePaperStore.getState().glossary).length > 0 &&
+              `(${Object.keys(usePaperStore.getState().glossary).length})`}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className={`w-3 h-3 transition-transform ${showGlossary ? 'rotate-180' : ''}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </button>
 
@@ -306,49 +486,82 @@ export default function PaperTranslatePage() {
           {/* Text Input */}
           <div className="space-y-1">
             <div className="flex justify-between items-center">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">한국어 논문 텍스트</label>
-              <span className="text-[10px] text-gray-400">{charCount.toLocaleString()}자</span>
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                한국어 논문 텍스트
+              </label>
+              <span className="text-[10px] text-gray-400">
+                {charCount.toLocaleString()}자
+              </span>
             </div>
             <textarea
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder={"논문 전체 또는 일부를 붙여넣으세요.\n\n제목, 초록, 키워드, 본문, 참고문헌을\n자동으로 구분하여 섹션별로 번역합니다."}
+              placeholder={
+                '논문 전체 또는 일부를 붙여넣으세요.\n\n제목, 초록, 키워드, 본문, 참고문헌을\n자동으로 구분하여 섹션별로 번역합니다.'
+              }
               rows={14}
               className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-3 resize-y placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/30 dark:focus:ring-accent/30"
             />
           </div>
 
-          {/* Translate Button */}
-          <button
-            onClick={handleTranslate}
-            disabled={isTranslating || !inputText.trim() || !ollamaRunning}
-            className="w-full py-3 rounded-xl text-white font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-primary hover:bg-primary/90 dark:bg-accent dark:hover:bg-accent/90 active:scale-[0.98]"
-          >
-            {isTranslating ? (
+          {/* Translate / Cancel Buttons */}
+          {isTranslating ? (
+            <button
+              onClick={cancelTranslation}
+              className="w-full py-3 rounded-xl text-white font-semibold transition-all bg-red-500 hover:bg-red-600 active:scale-[0.98]"
+            >
               <span className="flex items-center justify-center gap-2">
-                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
-                  <path fill="currentColor" className="opacity-75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
-                번역 중... {progress}%
+                번역 취소 ({progress}%)
               </span>
-            ) : (
-              '학술 영어로 번역하기'
-            )}
-          </button>
+            </button>
+          ) : (
+            <button
+              onClick={handleTranslate}
+              disabled={!inputText.trim() || !ollamaRunning}
+              className="w-full py-3 rounded-xl text-white font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-primary hover:bg-primary/90 dark:bg-accent dark:hover:bg-accent/90 active:scale-[0.98]"
+            >
+              학술 영어로 번역하기
+            </button>
+          )}
         </div>
       )}
 
       {/* Result Tab */}
       {activeTab === 'result' && (
-        <TranslationResult
-          sections={sections}
-          isTranslating={isTranslating}
-          progress={progress}
-          onRetry={handleRetrySection}
-          onCopyAll={handleCopyAll}
-          onRequestStudy={handleRequestStudy}
-        />
+        <>
+          {/* 진행 중 취소 버튼 (결과 탭에서도 표시) */}
+          {isTranslating && (
+            <button
+              onClick={cancelTranslation}
+              className="w-full py-2 rounded-lg text-sm text-red-600 border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            >
+              번역 취소 ({progress}%)
+            </button>
+          )}
+          <TranslationResult
+            sections={sections}
+            isTranslating={isTranslating}
+            progress={progress}
+            onRetry={handleRetrySection}
+            onCopyAll={handleCopyAll}
+            onRequestStudy={handleRequestStudy}
+            onEditSection={editSectionTranslation}
+          />
+        </>
       )}
 
       {/* History Tab */}

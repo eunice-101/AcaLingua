@@ -112,7 +112,7 @@ export interface StudyNote {
 /** 논문 번역 섹션 */
 export interface PaperSection {
   id: string;
-  type: 'title' | 'abstract' | 'keywords' | 'heading' | 'body' | 'references' | 'footnote';
+  type: 'title' | 'abstract' | 'keywords' | 'heading' | 'body' | 'references' | 'footnote' | 'caption';
   original: string;
   translated: string;
   status: 'pending' | 'translating' | 'done' | 'error';

@@ -20,11 +20,15 @@ interface PaperState {
   history: PaperTranslationRecord[];
   ollamaModel: string;
 
+  /** 번역 취소용 AbortController (비영속) */
+  abortController: AbortController | null;
+
   setInputText: (text: string) => void;
   setField: (field: AcademicField) => void;
   setTone: (tone: AcademicTone) => void;
   setSections: (sections: PaperSection[]) => void;
   updateSection: (id: string, partial: Partial<PaperSection>) => void;
+  editSectionTranslation: (id: string, newText: string) => void;
   setGlossary: (glossary: Record<string, string>) => void;
   addGlossaryEntry: (ko: string, en: string) => void;
   removeGlossaryEntry: (ko: string) => void;
@@ -36,6 +40,10 @@ interface PaperState {
   deleteFromHistory: (id: string) => void;
   clearAll: () => void;
   setOllamaModel: (model: string) => void;
+
+  /** 번역 취소 */
+  setAbortController: (ctrl: AbortController | null) => void;
+  cancelTranslation: () => void;
 }
 
 export const usePaperStore = create<PaperState>()(
@@ -51,6 +59,7 @@ export const usePaperStore = create<PaperState>()(
       error: null,
       history: [],
       ollamaModel: 'gemma3',
+      abortController: null,
 
       setInputText: (text) => set({ inputText: text }),
       setField: (field) => set({ field }),
@@ -62,6 +71,15 @@ export const usePaperStore = create<PaperState>()(
             sec.id === id ? { ...sec, ...partial } : sec,
           ),
         })),
+
+      /** 번역 결과 직접 편집 */
+      editSectionTranslation: (id, newText) =>
+        set((s) => ({
+          sections: s.sections.map((sec) =>
+            sec.id === id ? { ...sec, translated: newText } : sec,
+          ),
+        })),
+
       setGlossary: (glossary) => set({ glossary }),
       addGlossaryEntry: (ko, en) =>
         set((s) => ({ glossary: { ...s.glossary, [ko]: en } })),
@@ -102,6 +120,19 @@ export const usePaperStore = create<PaperState>()(
       clearAll: () =>
         set({ inputText: '', sections: [], progress: 0, error: null }),
       setOllamaModel: (model) => set({ ollamaModel: model }),
+
+      setAbortController: (ctrl) => set({ abortController: ctrl }),
+      cancelTranslation: () => {
+        const { abortController } = get();
+        if (abortController) {
+          abortController.abort();
+        }
+        set({
+          isTranslating: false,
+          abortController: null,
+          error: '번역이 취소되었습니다.',
+        });
+      },
     }),
     {
       name: 'acalingua-paper',
