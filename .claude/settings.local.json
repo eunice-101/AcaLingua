@@ -29,7 +29,10 @@
       "PowerShell(irm https://ollama.com/install.ps1 | iex)",
       "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://localhost:11434/api/tags\" -Method Get; \"Running. Models: $\\(\\($r.models | ForEach-Object { $_.name }\\) -join ', '\\)\" } catch { \"Not running: $\\($_.Exception.Message\\)\" })",
       "mcp__Claude_in_Chrome__tabs_context_mcp",
-      "Bash(npm ls *)"
+      "Bash(npm ls *)",
+      "Bash(timeout 5)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)"
     ]
   },
   "hooks": {

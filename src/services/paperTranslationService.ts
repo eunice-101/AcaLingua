@@ -1,8 +1,8 @@
 /**
- * 논문 번역 서비스 v2 — Ollama 로컬 LLM (API 키 불필요)
- * 스트리밍 번역 · 긴 본문 청크 분할 · 개선된 섹션 감지
+ * 논문 번역 서비스 v3 — Ollama 로컬 LLM (API 키 불필요)
+ * 컨텍스트 연속 번역 · 스트리밍 쓰로틀 · 청크 분할 · 번역 캐시
  */
-import type { PaperTranslateRequest, PaperTranslateResponse, StudyNote } from '@/types';
+import type { PaperTranslateRequest, PaperTranslateResponse, StudyNote, PaperSection } from '@/types';
 import { MAX_RETRY_COUNT } from '@/constants';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -11,8 +11,69 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * 상수
  * ──────────────────────────────────────────── */
 
-/** 청크 분할 기준 글자 수 (gemma3 컨텍스트 안전 범위) */
 const MAX_CHARS_PER_CHUNK = 1500;
+
+/* ────────────────────────────────────────────
+ * 스트리밍 쓰로틀 유틸리티
+ * — 매 토큰 업데이트 대신 50ms 간격으로 배치
+ * ──────────────────────────────────────────── */
+
+export function createThrottle(
+  fn: (text: string) => void,
+  ms: number = 50,
+) {
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let latestText = '';
+
+  return {
+    call(text: string) {
+      latestText = text;
+      const now = Date.now();
+      if (now - last >= ms) {
+        last = now;
+        fn(text);
+      } else if (!timer) {
+        timer = setTimeout(() => {
+          fn(latestText);
+          last = Date.now();
+          timer = null;
+        }, ms - (now - last));
+      }
+    },
+    flush() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      fn(latestText);
+    },
+  };
+}
+
+/* ────────────────────────────────────────────
+ * 번역 캐시 (동일 텍스트 즉시 반환)
+ * ──────────────────────────────────────────── */
+
+const translationCache = new Map<string, string>();
+const MAX_CACHE_SIZE = 100;
+
+function getCacheKey(text: string, field: string, tone: string): string {
+  return `${field}:${tone}:${text.slice(0, 200)}:${text.length}`;
+}
+
+function getCached(key: string): string | undefined {
+  return translationCache.get(key);
+}
+
+function setCache(key: string, translated: string): void {
+  if (translationCache.size >= MAX_CACHE_SIZE) {
+    // LRU: 가장 오래된 항목 삭제
+    const firstKey = translationCache.keys().next().value;
+    if (firstKey !== undefined) translationCache.delete(firstKey);
+  }
+  translationCache.set(key, translated);
+}
 
 /* ────────────────────────────────────────────
  * 학술 번역 시스템 프롬프트 빌더
@@ -50,10 +111,15 @@ const SECTION_INSTRUCTIONS: Record<string, string> = {
     'This is a figure or table caption. Translate accurately, preserving any numbering (e.g., "Figure 1", "Table 2"). Keep it concise.',
 };
 
+/**
+ * 컨텍스트 연속 프롬프트 빌더
+ * — 이전 번역 결과를 포함하여 용어 일관성 유지
+ */
 function buildSystemPrompt(
   field: string,
   tone: string,
   glossary?: Record<string, string>,
+  previousTranslations?: string[],
 ): string {
   const fieldLabel = FIELD_LABELS[field] || 'general academia';
   const toneGuide =
@@ -69,6 +135,16 @@ function buildSystemPrompt(
     glossaryGuide = `\n\nYou MUST use the following terminology consistently:\n${entries}`;
   }
 
+  // 이전 번역 컨텍스트 (최근 3개, 각 300자 제한)
+  let contextGuide = '';
+  if (previousTranslations && previousTranslations.length > 0) {
+    const recent = previousTranslations
+      .slice(-3)
+      .map((t) => t.slice(0, 300))
+      .join('\n---\n');
+    contextGuide = `\n\nCONTEXT FROM SAME PAPER (maintain consistent terminology and style):\n---\n${recent}\n---`;
+  }
+
   return `You are an expert academic translator specializing in ${fieldLabel}. Translate Korean academic text into English for presentation at international conferences.
 
 TRANSLATION PRINCIPLES:
@@ -81,7 +157,7 @@ TRANSLATION PRINCIPLES:
 7. Do NOT add information not present in the original.
 8. Do NOT omit any content from the original.
 9. Ensure subject-verb agreement, article usage, and preposition choices are natural for academic English.
-10. For theological/humanities papers: preserve nuance in conceptual terms; transliterate key Korean/Asian concepts when no exact English equivalent exists, with the English approximation in parentheses.${glossaryGuide}
+10. For theological/humanities papers: preserve nuance in conceptual terms; transliterate key Korean/Asian concepts when no exact English equivalent exists, with the English approximation in parentheses.${glossaryGuide}${contextGuide}
 
 OUTPUT: Return ONLY the translated English text. Do not include explanations, notes, or the original Korean text.`;
 }
@@ -95,8 +171,22 @@ export async function translatePaperSectionStreaming(
   model: string = 'gemma3',
   onToken: (fullTextSoFar: string) => void,
   signal?: AbortSignal,
+  previousTranslations?: string[],
 ): Promise<PaperTranslateResponse> {
-  const systemPrompt = buildSystemPrompt(req.field, req.tone, req.glossary);
+  // 캐시 확인
+  const cacheKey = getCacheKey(req.text, req.field, req.tone);
+  const cached = getCached(cacheKey);
+  if (cached) {
+    onToken(cached);
+    return { translatedText: cached };
+  }
+
+  const systemPrompt = buildSystemPrompt(
+    req.field,
+    req.tone,
+    req.glossary,
+    previousTranslations,
+  );
   const sectionInstruction =
     SECTION_INSTRUCTIONS[req.sectionType] || SECTION_INSTRUCTIONS.body;
   const userMessage = `${sectionInstruction}\n\n---\n\n${req.text}`;
@@ -146,6 +236,10 @@ export async function translatePaperSectionStreaming(
 
   const trimmed = fullText.trim();
   if (!trimmed) throw new Error('Ollama returned empty response');
+
+  // 캐시 저장
+  setCache(cacheKey, trimmed);
+
   return { translatedText: trimmed };
 }
 
@@ -158,17 +252,23 @@ export async function translateWithRetry(
   model: string = 'gemma3',
   onToken: (fullTextSoFar: string) => void,
   signal?: AbortSignal,
+  previousTranslations?: string[],
 ): Promise<PaperTranslateResponse> {
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRY_COUNT; attempt++) {
     try {
-      return await translatePaperSectionStreaming(req, model, onToken, signal);
+      return await translatePaperSectionStreaming(
+        req,
+        model,
+        onToken,
+        signal,
+        previousTranslations,
+      );
     } catch (err) {
-      // 사용자가 취소한 경우 즉시 throw
       if (signal?.aborted) throw err;
       lastError = err instanceof Error ? err : new Error(String(err));
-      onToken(''); // 디스플레이 리셋
+      onToken('');
       if (attempt < MAX_RETRY_COUNT - 1) {
         await sleep(Math.pow(2, attempt) * 1000);
       }
@@ -188,7 +288,6 @@ export function chunkLongText(
 ): string[] {
   if (text.length <= maxChars) return [text];
 
-  // 1차: 문단 단위 분할 (단일 줄바꿈)
   const paragraphs = text.split(/\n/).filter((p) => p.trim());
   const chunks: string[] = [];
   let current = '';
@@ -203,7 +302,6 @@ export function chunkLongText(
   }
   if (current.trim()) chunks.push(current.trim());
 
-  // 2차: 여전히 긴 청크는 문장 단위 분할
   const finalChunks: string[] = [];
   for (const chunk of chunks) {
     if (chunk.length <= maxChars) {
@@ -236,11 +334,7 @@ export async function translatePaperSection(
   req: PaperTranslateRequest,
   model: string = 'gemma3',
 ): Promise<PaperTranslateResponse> {
-  return await translateWithRetry(
-    req,
-    model,
-    () => { /* no-op for non-streaming */ },
-  );
+  return await translateWithRetry(req, model, () => {});
 }
 
 /* ────────────────────────────────────────────
@@ -336,7 +430,7 @@ export async function checkOllamaStatus(): Promise<{
 }
 
 /* ────────────────────────────────────────────
- * 섹션 분리기 v2 — 개선된 감지
+ * 섹션 분리기 v3 — 개선된 감지
  * ──────────────────────────────────────────── */
 
 export type SectionType =
@@ -350,20 +444,10 @@ export type SectionType =
   | 'caption';
 
 const SECTION_SPLITTER = /\n{2,}/;
-
-/** 한국어 문장형 종결어미 패턴 */
 const KO_SENTENCE_END = /[다요음됨함임]\s*[.!?]?\s*$/;
 const PERIOD_END = /\.\s*$/;
-
-/** 그림/표 캡션 패턴 */
-const CAPTION_PATTERN =
-  /^(그림|표|Figure|Table|Fig\.|Tab\.)\s*[\d.:]/i;
-
-/** 번호 매긴 제목 패턴 */
-const NUMBERED_HEADING =
-  /^[\dIVXⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+[.\s)]\s*/;
-
-/** 한글 제목 키워드 패턴 */
+const CAPTION_PATTERN = /^(그림|표|Figure|Table|Fig\.|Tab\.)\s*[\d.:]/i;
+const NUMBERED_HEADING = /^[\dIVXⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+[.\s)]\s*/;
 const KO_HEADING_KEYWORDS =
   /^(서론|결론|본론|논의|방법론?|이론적\s*배경|연구\s*방법|연구\s*결과|선행\s*연구|문헌\s*고찰|분석\s*결과|요약\s*및\s*결론|결론\s*및\s*제언)/;
 
@@ -377,13 +461,11 @@ export function splitIntoSections(
     const block = blocks[i].trim();
     if (!block) continue;
 
-    // ─── 그림/표 캡션 ───
     if (CAPTION_PATTERN.test(block)) {
       sections.push({ type: 'caption', text: block });
       continue;
     }
 
-    // ─── 첫 번째 블록: 제목 vs 본문 판별 ───
     if (i === 0 && block.length < 200 && !block.includes('\n')) {
       const isSentence =
         KO_SENTENCE_END.test(block) || PERIOD_END.test(block);
@@ -391,7 +473,6 @@ export function splitIntoSections(
       continue;
     }
 
-    // ─── 초록 ───
     if (
       /^(초록|abstract|요약)/i.test(block) ||
       (i === 1 && /^(본\s*연구|이\s*논문|본\s*고)/u.test(block))
@@ -403,7 +484,6 @@ export function splitIntoSections(
       continue;
     }
 
-    // ─── 키워드 ───
     if (/^(키워드|핵심어|주제어|keywords?)[:\s]/i.test(block)) {
       sections.push({
         type: 'keywords',
@@ -412,19 +492,16 @@ export function splitIntoSections(
       continue;
     }
 
-    // ─── 참고문헌 ───
     if (/^(참고\s*문헌|references?|bibliography)/i.test(block)) {
       sections.push({ type: 'references', text: block });
       continue;
     }
 
-    // ─── 각주 ───
     if (/^(각주|footnote|주\)?\s*\d)/i.test(block)) {
       sections.push({ type: 'footnote', text: block });
       continue;
     }
 
-    // ─── 제목/소제목 판별 (개선) ───
     if (
       block.length < 100 &&
       !PERIOD_END.test(block) &&
@@ -434,18 +511,15 @@ export function splitIntoSections(
       const isNumbered = NUMBERED_HEADING.test(block);
       const isKoHeading = KO_HEADING_KEYWORDS.test(block);
       const isShort = block.length < 50;
-
       if (isNumbered || isKoHeading || isShort) {
         sections.push({ type: 'heading', text: block });
         continue;
       }
     }
 
-    // ─── 본문: 긴 블록은 문단 단위로 분리 ───
+    // 긴 블록은 문단 단위로 분리
     if (block.length > MAX_CHARS_PER_CHUNK && block.includes('\n')) {
-      const subParagraphs = block
-        .split(/\n/)
-        .filter((p) => p.trim());
+      const subParagraphs = block.split(/\n/).filter((p) => p.trim());
       for (const para of subParagraphs) {
         sections.push({ type: 'body', text: para.trim() });
       }
@@ -459,13 +533,54 @@ export function splitIntoSections(
 }
 
 /* ────────────────────────────────────────────
+ * 번역 품질 메트릭
+ * ──────────────────────────────────────────── */
+
+export interface QualityMetrics {
+  originalChars: number;
+  translatedChars: number;
+  originalWords: number;
+  translatedWords: number;
+  /** 한→영 길이 비율 (정상: 1.3~2.5) */
+  lengthRatio: number;
+  /** 품질 등급 */
+  grade: 'good' | 'warning' | 'concern';
+}
+
+export function calcQualityMetrics(
+  original: string,
+  translated: string,
+): QualityMetrics {
+  const originalChars = original.length;
+  const translatedChars = translated.length;
+  const originalWords = original.split(/\s+/).filter(Boolean).length;
+  const translatedWords = translated.split(/\s+/).filter(Boolean).length;
+  const lengthRatio = originalChars > 0 ? translatedChars / originalChars : 0;
+
+  let grade: QualityMetrics['grade'] = 'good';
+  if (lengthRatio < 0.8 || lengthRatio > 3.5) {
+    grade = 'concern'; // 번역 누락 또는 과잉
+  } else if (lengthRatio < 1.0 || lengthRatio > 3.0) {
+    grade = 'warning';
+  }
+
+  return {
+    originalChars,
+    translatedChars,
+    originalWords,
+    translatedWords,
+    lengthRatio,
+    grade,
+  };
+}
+
+/* ────────────────────────────────────────────
  * DOCX 내보내기
  * ──────────────────────────────────────────── */
 
-import type { PaperSection } from '@/types';
-
 export async function exportToDocx(
   sections: PaperSection[],
+  bilingual: boolean = false,
   filename?: string,
 ): Promise<void> {
   const {
@@ -484,22 +599,70 @@ export async function exportToDocx(
   const children: InstanceType<typeof Paragraph>[] = [];
 
   for (const sec of doneSections) {
+    // 이중언어 모드: 원문 먼저 표시
+    if (bilingual && sec.type !== 'title') {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: sec.original,
+              size: 20,
+              font: 'Malgun Gothic',
+              color: '666666',
+            }),
+          ],
+          spacing: { after: 100 },
+        }),
+      );
+    }
+
     switch (sec.type) {
       case 'title':
-        children.push(
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: sec.translated,
-                bold: true,
-                size: 32, // 16pt
-                font: 'Times New Roman',
-              }),
-            ],
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 400 },
-          }),
-        );
+        if (bilingual) {
+          // 이중언어 제목: 한글 + 영문
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: sec.original,
+                  bold: true,
+                  size: 28,
+                  font: 'Malgun Gothic',
+                  color: '444444',
+                }),
+              ],
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 100 },
+            }),
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: sec.translated,
+                  bold: true,
+                  size: 32,
+                  font: 'Times New Roman',
+                }),
+              ],
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 400 },
+            }),
+          );
+        } else {
+          children.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: sec.translated,
+                  bold: true,
+                  size: 32,
+                  font: 'Times New Roman',
+                }),
+              ],
+              alignment: AlignmentType.CENTER,
+              spacing: { after: 400 },
+            }),
+          );
+        }
         break;
 
       case 'abstract':
@@ -513,7 +676,7 @@ export async function exportToDocx(
             children: [
               new TextRun({
                 text: sec.translated,
-                size: 22, // 11pt
+                size: 22,
                 font: 'Times New Roman',
                 italics: true,
               }),
@@ -569,7 +732,7 @@ export async function exportToDocx(
             children: [
               new TextRun({
                 text: sec.translated,
-                size: 20, // 10pt
+                size: 20,
                 font: 'Times New Roman',
                 italics: true,
               }),
@@ -606,7 +769,7 @@ export async function exportToDocx(
             children: [
               new TextRun({
                 text: sec.translated,
-                size: 18, // 9pt
+                size: 18,
                 font: 'Times New Roman',
                 color: '666666',
               }),
@@ -617,17 +780,16 @@ export async function exportToDocx(
         break;
 
       default:
-        // body
         children.push(
           new Paragraph({
             children: [
               new TextRun({
                 text: sec.translated,
-                size: 24, // 12pt
+                size: 24,
                 font: 'Times New Roman',
               }),
             ],
-            spacing: { after: 200, line: 360 }, // 1.5 줄간격
+            spacing: { after: 200, line: 360 },
           }),
         );
     }
@@ -638,12 +800,7 @@ export async function exportToDocx(
       {
         properties: {
           page: {
-            margin: {
-              top: 1440,   // 1 inch
-              right: 1440,
-              bottom: 1440,
-              left: 1440,
-            },
+            margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
           },
         },
         children,
@@ -656,8 +813,7 @@ export async function exportToDocx(
   const a = document.createElement('a');
   a.href = url;
   a.download =
-    filename ||
-    `translated_paper_${new Date().toISOString().slice(0, 10)}.docx`;
+    filename || `translated_paper_${new Date().toISOString().slice(0, 10)}.docx`;
   a.click();
   URL.revokeObjectURL(url);
 }
