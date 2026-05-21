@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { usePaperStore } from '@/stores/usePaperStore';
 import type { AcademicField, AcademicTone, PaperSection } from '@/types';
-import { splitIntoSections, translatePaperSection } from '@/services/paperTranslationService';
+import { splitIntoSections, translatePaperSection, checkOllamaStatus } from '@/services/paperTranslationService';
 import { generateId } from '@/utils/uuid';
 import GlossaryEditor from './GlossaryEditor';
 import TranslationResult from './TranslationResult';
@@ -38,11 +38,25 @@ export default function PaperTranslatePage() {
     progress, setProgress,
     error, setError,
     saveToHistory, clearAll,
-    openaiApiKey,
+    ollamaModel, setOllamaModel,
   } = usePaperStore();
 
   const [activeTab, setActiveTab] = useState<TabView>(sections.length > 0 ? 'result' : 'input');
   const [showGlossary, setShowGlossary] = useState(false);
+  const [ollamaRunning, setOllamaRunning] = useState<boolean | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+
+  // Ollama 상태 확인
+  useEffect(() => {
+    checkOllamaStatus().then(({ running, models }) => {
+      setOllamaRunning(running);
+      setAvailableModels(models);
+      // 현재 선택된 모델이 목록에 없으면 첫 번째 모델로 변경
+      if (running && models.length > 0 && !models.includes(ollamaModel)) {
+        setOllamaModel(models[0]);
+      }
+    });
+  }, []);
 
   const handleTranslate = useCallback(async () => {
     if (!inputText.trim()) {
@@ -50,8 +64,11 @@ export default function PaperTranslatePage() {
       return;
     }
 
-    if (!openaiApiKey) {
-      setError('설정에서 OpenAI API 키를 입력해주세요.');
+    // Ollama 연결 재확인
+    const { running } = await checkOllamaStatus();
+    if (!running) {
+      setError('Ollama가 실행되고 있지 않습니다. 터미널에서 "ollama serve"를 실행해주세요.');
+      setOllamaRunning(false);
       return;
     }
 
@@ -78,7 +95,7 @@ export default function PaperTranslatePage() {
       try {
         const result = await translatePaperSection(
           { text: sec.original, sectionType: sec.type, field, tone, glossary },
-          openaiApiKey,
+          ollamaModel,
         );
         updateSection(sec.id, {
           translated: result.translatedText,
@@ -94,7 +111,7 @@ export default function PaperTranslatePage() {
 
     setTranslating(false);
     saveToHistory();
-  }, [inputText, field, tone, glossary, openaiApiKey, setError, setTranslating, setProgress, setSections, updateSection, saveToHistory, setActiveTab]);
+  }, [inputText, field, tone, glossary, ollamaModel, setError, setTranslating, setProgress, setSections, updateSection, saveToHistory]);
 
   const handleRetrySection = useCallback(async (sectionId: string) => {
     const sec = usePaperStore.getState().sections.find((s) => s.id === sectionId);
@@ -105,14 +122,14 @@ export default function PaperTranslatePage() {
     try {
       const result = await translatePaperSection(
         { text: sec.original, sectionType: sec.type, field, tone, glossary },
-        openaiApiKey,
+        ollamaModel,
       );
       updateSection(sectionId, { translated: result.translatedText, status: 'done' });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Retry failed';
       updateSection(sectionId, { status: 'error', error: msg });
     }
-  }, [field, tone, glossary, openaiApiKey, updateSection]);
+  }, [field, tone, glossary, ollamaModel, updateSection]);
 
   const handleCopyAll = useCallback(() => {
     const text = sections
@@ -122,6 +139,12 @@ export default function PaperTranslatePage() {
     navigator.clipboard.writeText(text);
   }, [sections]);
 
+  const handleRefreshOllama = useCallback(async () => {
+    const { running, models } = await checkOllamaStatus();
+    setOllamaRunning(running);
+    setAvailableModels(models);
+  }, []);
+
   const completedCount = sections.filter((s) => s.status === 'done').length;
   const charCount = inputText.length;
 
@@ -130,14 +153,60 @@ export default function PaperTranslatePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-gray-800 dark:text-gray-200">논문 번역</h2>
-        {sections.length > 0 && (
-          <button
-            onClick={() => { clearAll(); setActiveTab('input'); }}
-            className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-          >
-            초기화
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {sections.length > 0 && (
+            <button
+              onClick={() => { clearAll(); setActiveTab('input'); }}
+              className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+            >
+              초기화
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Ollama Status */}
+      <div className={`flex items-center justify-between px-3 py-2 rounded-lg text-xs ${
+        ollamaRunning === null
+          ? 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+          : ollamaRunning
+            ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
+            : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
+      }`}>
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${
+            ollamaRunning === null ? 'bg-gray-400 animate-pulse' : ollamaRunning ? 'bg-green-500' : 'bg-red-500'
+          }`} />
+          {ollamaRunning === null && 'Ollama 연결 확인 중...'}
+          {ollamaRunning === true && (
+            <span>
+              Ollama 연결됨 — 모델:
+              {availableModels.length > 1 ? (
+                <select
+                  value={ollamaModel}
+                  onChange={(e) => setOllamaModel(e.target.value)}
+                  className="ml-1 px-1.5 py-0.5 rounded border border-green-300 dark:border-green-700 bg-transparent font-medium"
+                >
+                  {availableModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="font-semibold ml-1">{ollamaModel}</span>
+              )}
+            </span>
+          )}
+          {ollamaRunning === false && (
+            <span>
+              Ollama 미연결 — 터미널에서 <code className="px-1 py-0.5 bg-red-100 dark:bg-red-900/40 rounded font-mono">ollama serve</code> 실행 필요
+            </span>
+          )}
+        </div>
+        <button onClick={handleRefreshOllama} className="hover:opacity-70" title="새로고침">
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
       </div>
 
       {/* Tab Navigation */}
@@ -238,7 +307,7 @@ export default function PaperTranslatePage() {
           {/* Translate Button */}
           <button
             onClick={handleTranslate}
-            disabled={isTranslating || !inputText.trim()}
+            disabled={isTranslating || !inputText.trim() || !ollamaRunning}
             className="w-full py-3 rounded-xl text-white font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-primary hover:bg-primary/90 dark:bg-accent dark:hover:bg-accent/90 active:scale-[0.98]"
           >
             {isTranslating ? (

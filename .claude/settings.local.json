@@ -23,7 +23,8 @@
       "Bash(npx -y github-create-repo)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.github.com/repos/eunice-101/AcaLingua)",
       "Bash(find /c/Users/10_17/Desktop/AcaLingua -path */api/*.ts -o -path */api/*.js)",
-      "WebSearch"
+      "WebSearch",
+      "PowerShell(Remove-Item \"C:\\\\Users\\\\10_17\\\\Desktop\\\\AcaLingua\\\\api\\\\paper-translate.ts\" -Confirm:$false)"
     ]
   },
   "hooks": {

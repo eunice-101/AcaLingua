@@ -18,7 +18,7 @@ interface PaperState {
   progress: number;
   error: string | null;
   history: PaperTranslationRecord[];
-  openaiApiKey: string;
+  ollamaModel: string;
 
   setInputText: (text: string) => void;
   setField: (field: AcademicField) => void;
@@ -35,7 +35,7 @@ interface PaperState {
   loadFromHistory: (record: PaperTranslationRecord) => void;
   deleteFromHistory: (id: string) => void;
   clearAll: () => void;
-  setOpenaiApiKey: (key: string) => void;
+  setOllamaModel: (model: string) => void;
 }
 
 export const usePaperStore = create<PaperState>()(
@@ -50,7 +50,7 @@ export const usePaperStore = create<PaperState>()(
       progress: 0,
       error: null,
       history: [],
-      openaiApiKey: '',
+      ollamaModel: 'gemma3',
 
       setInputText: (text) => set({ inputText: text }),
       setField: (field) => set({ field }),
@@ -101,7 +101,7 @@ export const usePaperStore = create<PaperState>()(
         set((s) => ({ history: s.history.filter((h) => h.id !== id) })),
       clearAll: () =>
         set({ inputText: '', sections: [], progress: 0, error: null }),
-      setOpenaiApiKey: (key) => set({ openaiApiKey: key }),
+      setOllamaModel: (model) => set({ ollamaModel: model }),
     }),
     {
       name: 'acalingua-paper',
@@ -110,7 +110,7 @@ export const usePaperStore = create<PaperState>()(
         tone: state.tone,
         glossary: state.glossary,
         history: state.history,
-        openaiApiKey: state.openaiApiKey,
+        ollamaModel: state.ollamaModel,
       }),
     },
   ),

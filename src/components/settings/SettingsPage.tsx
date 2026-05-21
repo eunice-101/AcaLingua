@@ -1,8 +1,10 @@
 /**
  * 설정 페이지 — TTS, 글자 크기, 다크모드, 화면 꺼짐 방지, 연속 인식, API 키
  */
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
 import { usePaperStore } from '@/stores/usePaperStore';
+import { checkOllamaStatus } from '@/services/paperTranslationService';
 import type { FontSizeLevel, TranslationEngine, TtsGender } from '@/types';
 
 /** 슬라이더 설정 항목 */
@@ -69,8 +71,17 @@ const engineOptions: { value: TranslationEngine; label: string }[] = [
 export default function SettingsPage() {
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
-  const openaiApiKey = usePaperStore((s) => s.openaiApiKey);
-  const setOpenaiApiKey = usePaperStore((s) => s.setOpenaiApiKey);
+  const ollamaModel = usePaperStore((s) => s.ollamaModel);
+  const setOllamaModel = usePaperStore((s) => s.setOllamaModel);
+  const [ollamaRunning, setOllamaRunning] = useState<boolean | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    checkOllamaStatus().then(({ running, models }) => {
+      setOllamaRunning(running);
+      setAvailableModels(models);
+    });
+  }, []);
 
   return (
     <div className="px-4 py-4 space-y-6 max-w-lg mx-auto">
@@ -185,19 +196,41 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* 논문 번역 (OpenAI) */}
+      {/* 논문 번역 (Ollama 로컬) */}
       <section className="space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">논문 번역 (GPT-4o)</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">논문 번역 (Ollama 로컬 AI)</h3>
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`w-2 h-2 rounded-full ${
+            ollamaRunning === null ? 'bg-gray-400 animate-pulse' : ollamaRunning ? 'bg-green-500' : 'bg-red-500'
+          }`} />
+          <span className={ollamaRunning ? 'text-green-600 dark:text-green-400' : 'text-red-500'}>
+            {ollamaRunning === null ? '확인 중...' : ollamaRunning ? 'Ollama 연결됨' : 'Ollama 미연결'}
+          </span>
+        </div>
         <div className="space-y-1">
-          <span className="text-sm text-gray-700 dark:text-gray-300">OpenAI API 키</span>
-          <input
-            type="password"
-            value={openaiApiKey}
-            onChange={(e) => setOpenaiApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 placeholder:text-gray-400"
-          />
-          <p className="text-[10px] text-gray-400">논문 번역에 사용됩니다. platform.openai.com에서 발급받으세요.</p>
+          <span className="text-sm text-gray-700 dark:text-gray-300">AI 모델</span>
+          {availableModels.length > 0 ? (
+            <select
+              value={ollamaModel}
+              onChange={(e) => setOllamaModel(e.target.value)}
+              className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
+            >
+              {availableModels.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={ollamaModel}
+              onChange={(e) => setOllamaModel(e.target.value)}
+              placeholder="gemma3"
+              className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 placeholder:text-gray-400"
+            />
+          )}
+          <p className="text-[10px] text-gray-400">
+            API 키 없이 내 컴퓨터에서 실행됩니다. 터미널에서 "ollama pull gemma3" 으로 모델을 설치하세요.
+          </p>
         </div>
       </section>
     </div>
