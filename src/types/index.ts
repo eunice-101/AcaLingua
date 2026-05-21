@@ -78,3 +78,55 @@ export interface TranslationProvider {
   translate(request: TranslationRequest, apiKey?: string): Promise<TranslationResponse>;
   supportsLanguage(lang: LanguageCode): boolean;
 }
+
+/** 논문 번역 학술 톤 */
+export type AcademicTone = 'formal' | 'accessible';
+
+/** 논문 번역 학문 분야 */
+export type AcademicField =
+  | 'general'
+  | 'theology'
+  | 'humanities'
+  | 'social-science'
+  | 'natural-science'
+  | 'engineering'
+  | 'medical'
+  | 'law'
+  | 'education'
+  | 'arts';
+
+/** 논문 번역 섹션 */
+export interface PaperSection {
+  id: string;
+  type: 'title' | 'abstract' | 'keywords' | 'heading' | 'body' | 'references' | 'footnote';
+  original: string;
+  translated: string;
+  status: 'pending' | 'translating' | 'done' | 'error';
+  error?: string;
+}
+
+/** 논문 번역 요청 */
+export interface PaperTranslateRequest {
+  text: string;
+  sectionType: PaperSection['type'];
+  field: AcademicField;
+  tone: AcademicTone;
+  glossary?: Record<string, string>;
+}
+
+/** 논문 번역 응답 */
+export interface PaperTranslateResponse {
+  translatedText: string;
+  suggestions?: string[];
+}
+
+/** 논문 번역 히스토리 */
+export interface PaperTranslationRecord {
+  id: string;
+  timestamp: number;
+  title: string;
+  field: AcademicField;
+  tone: AcademicTone;
+  sections: PaperSection[];
+  glossary: Record<string, string>;
+}

@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { useAppStore } from '@/stores/useAppStore';
 import Layout from '@/components/layout/Layout';
 import InterpreterPage from '@/components/interpreter/InterpreterPage';
+import PaperTranslatePage from '@/components/paper/PaperTranslatePage';
 import HistoryPage from '@/components/history/HistoryPage';
 import SettingsPage from '@/components/settings/SettingsPage';
 
@@ -22,6 +23,7 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<InterpreterPage />} />
+          <Route path="paper" element={<PaperTranslatePage />} />
           <Route path="history" element={<HistoryPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

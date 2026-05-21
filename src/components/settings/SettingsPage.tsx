@@ -2,6 +2,7 @@
  * 설정 페이지 — TTS, 글자 크기, 다크모드, 화면 꺼짐 방지, 연속 인식, API 키
  */
 import { useAppStore } from '@/stores/useAppStore';
+import { usePaperStore } from '@/stores/usePaperStore';
 import type { FontSizeLevel, TranslationEngine, TtsGender } from '@/types';
 
 /** 슬라이더 설정 항목 */
@@ -68,6 +69,8 @@ const engineOptions: { value: TranslationEngine; label: string }[] = [
 export default function SettingsPage() {
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
+  const openaiApiKey = usePaperStore((s) => s.openaiApiKey);
+  const setOpenaiApiKey = usePaperStore((s) => s.setOpenaiApiKey);
 
   return (
     <div className="px-4 py-4 space-y-6 max-w-lg mx-auto">
@@ -179,6 +182,22 @@ export default function SettingsPage() {
             className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 placeholder:text-gray-400"
           />
           <p className="text-[10px] text-gray-400">api-free.deepl.com에서 무료 키를 발급받을 수 있습니다</p>
+        </div>
+      </section>
+
+      {/* 논문 번역 (OpenAI) */}
+      <section className="space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">논문 번역 (GPT-4o)</h3>
+        <div className="space-y-1">
+          <span className="text-sm text-gray-700 dark:text-gray-300">OpenAI API 키</span>
+          <input
+            type="password"
+            value={openaiApiKey}
+            onChange={(e) => setOpenaiApiKey(e.target.value)}
+            placeholder="sk-..."
+            className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 placeholder:text-gray-400"
+          />
+          <p className="text-[10px] text-gray-400">논문 번역에 사용됩니다. platform.openai.com에서 발급받으세요.</p>
         </div>
       </section>
     </div>
