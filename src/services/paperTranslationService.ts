@@ -24,11 +24,11 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 const SECTION_INSTRUCTIONS: Record<string, string> = {
-  title: 'This is a paper title. Translate it concisely and impactfully, following academic title conventions. Do not add a period.',
+  title: 'This is a paper title. Translate the COMPLETE title accurately into English, following academic title conventions. Do not shorten, summarize, or omit any part of the original. Do not add a period.',
   abstract: 'This is an abstract. Maintain the standard abstract structure (background, purpose, methods, results, conclusion). Use present tense for established facts and past tense for methods/results.',
   keywords: 'These are keywords. Translate each keyword using the most widely accepted English terminology in the field. Separate with commas.',
   heading: 'This is a section heading. Keep it concise and follow standard academic paper heading conventions.',
-  body: 'This is body text from an academic paper. Maintain paragraph structure, logical flow, and academic argumentation style.',
+  body: 'This is body text from an academic paper. Translate the COMPLETE text without omitting or summarizing any part. Maintain paragraph structure, logical flow, and academic argumentation style.',
   references: 'These are bibliographic references. Translate Korean titles in brackets [like this] after the original. Keep author names in their original romanization. Preserve citation formatting exactly.',
   footnote: 'This is a footnote. Translate the content while preserving any reference numbers or markers.',
 };
@@ -150,7 +150,9 @@ export function splitIntoSections(text: string): { type: 'title' | 'abstract' | 
     if (!line) continue;
 
     if (i === 0 && line.length < 200 && !line.includes('\n')) {
-      sections.push({ type: 'title', text: line });
+      // 문장형 종결어미로 끝나면 title이 아닌 body (예: "~입니다.", "~한다.", "~이다.")
+      const isSentence = /[다요음됨함임]\s*[.!?]?\s*$/.test(line) || /\.\s*$/.test(line);
+      sections.push({ type: isSentence ? 'body' : 'title', text: line });
       continue;
     }
 
