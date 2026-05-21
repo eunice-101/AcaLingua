@@ -95,6 +95,20 @@ export type AcademicField =
   | 'education'
   | 'arts';
 
+/** 학습 도우미 — 핵심 표현 */
+export interface StudyPhrase {
+  phrase: string;
+  meaning: string;
+  example: string;
+}
+
+/** 학습 도우미 노트 */
+export interface StudyNote {
+  phrases: StudyPhrase[];
+  sentenceBreakdown: string;
+  memorizationTip: string;
+}
+
 /** 논문 번역 섹션 */
 export interface PaperSection {
   id: string;
@@ -103,6 +117,8 @@ export interface PaperSection {
   translated: string;
   status: 'pending' | 'translating' | 'done' | 'error';
   error?: string;
+  studyNote?: StudyNote;
+  studyStatus?: 'idle' | 'loading' | 'done' | 'error';
 }
 
 /** 논문 번역 요청 */

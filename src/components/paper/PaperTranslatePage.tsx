@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { usePaperStore } from '@/stores/usePaperStore';
 import type { AcademicField, AcademicTone, PaperSection } from '@/types';
-import { splitIntoSections, translatePaperSection, checkOllamaStatus } from '@/services/paperTranslationService';
+import { splitIntoSections, translatePaperSection, checkOllamaStatus, generateStudyNote } from '@/services/paperTranslationService';
 import { generateId } from '@/utils/uuid';
 import GlossaryEditor from './GlossaryEditor';
 import TranslationResult from './TranslationResult';
@@ -138,6 +138,20 @@ export default function PaperTranslatePage() {
       .join('\n\n');
     navigator.clipboard.writeText(text);
   }, [sections]);
+
+  const handleRequestStudy = useCallback(async (sectionId: string) => {
+    const sec = usePaperStore.getState().sections.find((s) => s.id === sectionId);
+    if (!sec || sec.status !== 'done' || sec.studyStatus === 'loading') return;
+
+    updateSection(sectionId, { studyStatus: 'loading' });
+
+    try {
+      const note = await generateStudyNote(sec.translated, sec.original, ollamaModel);
+      updateSection(sectionId, { studyNote: note, studyStatus: 'done' });
+    } catch {
+      updateSection(sectionId, { studyStatus: 'error' });
+    }
+  }, [ollamaModel, updateSection]);
 
   const handleRefreshOllama = useCallback(async () => {
     const { running, models } = await checkOllamaStatus();
@@ -333,6 +347,7 @@ export default function PaperTranslatePage() {
           progress={progress}
           onRetry={handleRetrySection}
           onCopyAll={handleCopyAll}
+          onRequestStudy={handleRequestStudy}
         />
       )}
 

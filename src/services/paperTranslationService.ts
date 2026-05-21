@@ -120,6 +120,77 @@ export async function translatePaperSection(
 }
 
 /* ────────────────────────────────────────────
+ * 학습 도우미 — 번역 결과 분석
+ * ──────────────────────────────────────────── */
+
+import type { StudyNote } from '@/types';
+
+const STUDY_SYSTEM_PROMPT = `You are an English study assistant for Korean academics. Analyze the given English academic sentence and return a JSON object with EXACTLY this structure:
+
+{
+  "phrases": [
+    {
+      "phrase": "key phrase or idiom in English",
+      "meaning": "한국어로 의미 설명",
+      "example": "Another example sentence using this phrase"
+    }
+  ],
+  "sentenceBreakdown": "문장을 청크 단위로 나누어 한국어 해석과 함께 설명. 예: 'This study examines(본 연구는 고찰한다) / the concept of X(X의 개념을) / in the context of Y(Y의 맥락에서)'",
+  "memorizationTip": "통문장 암기를 위한 한국어 팁. 핵심 구조를 파악하고 청크별로 외우는 방법 안내."
+}
+
+RULES:
+- Extract 2-4 key academic phrases or idioms from the text
+- The sentenceBreakdown must show the sentence split into meaningful chunks with Korean translations inline
+- The memorizationTip should give a practical memorization strategy in Korean
+- All Korean text must be natural and helpful
+- Return ONLY valid JSON, no other text`;
+
+export async function generateStudyNote(
+  translatedText: string,
+  originalText: string,
+  model: string = 'gemma3',
+): Promise<StudyNote> {
+  const res = await fetch('/ollama/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: STUDY_SYSTEM_PROMPT },
+        { role: 'user', content: `Original Korean:\n${originalText}\n\nEnglish translation:\n${translatedText}` },
+      ],
+      stream: false,
+      format: 'json',
+      options: { temperature: 0.4, num_predict: 2048 },
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Study note generation failed: ${res.status}`);
+  }
+
+  const data = await res.json();
+  const content = data.message?.content?.trim() ?? '';
+
+  try {
+    const parsed = JSON.parse(content);
+    return {
+      phrases: Array.isArray(parsed.phrases) ? parsed.phrases.slice(0, 4) : [],
+      sentenceBreakdown: parsed.sentenceBreakdown || '',
+      memorizationTip: parsed.memorizationTip || '',
+    };
+  } catch {
+    // JSON 파싱 실패 시 기본 구조 반환
+    return {
+      phrases: [],
+      sentenceBreakdown: content,
+      memorizationTip: '',
+    };
+  }
+}
+
+/* ────────────────────────────────────────────
  * Ollama 연결 상태 확인
  * ──────────────────────────────────────────── */
 
