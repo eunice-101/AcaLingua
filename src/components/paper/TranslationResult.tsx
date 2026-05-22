@@ -1,10 +1,79 @@
-import { useState, useRef, useEffect, memo } from 'react';
+import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import type { PaperSection, StudyNote } from '@/types';
 import {
   exportToDocx,
   exportStudyNotes,
   calcQualityMetrics,
 } from '@/services/paperTranslationService';
+
+/* ────────────────────────────────────────────
+ * TTS (Web Speech API)
+ * ──────────────────────────────────────────── */
+
+const isTTSSupported =
+  typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+function usePaperTTS() {
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+
+  const speak = useCallback((text: string, id: string) => {
+    if (!isTTSSupported || !text) return;
+    speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.92; // 자연스러운 발표 속도
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    // 영어 음성 선택 (자연스러운 로컬 음성 우선)
+    const voices = speechSynthesis.getVoices();
+    const enVoices = voices.filter((v) => v.lang.startsWith('en'));
+    const localEn = enVoices.find((v) => v.localService);
+    if (localEn) utterance.voice = localEn;
+    else if (enVoices.length > 0) utterance.voice = enVoices[0];
+
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = () => setSpeakingId(null);
+
+    setSpeakingId(id);
+    speechSynthesis.speak(utterance);
+  }, []);
+
+  const stop = useCallback(() => {
+    if (isTTSSupported) speechSynthesis.cancel();
+    setSpeakingId(null);
+  }, []);
+
+  const speakAll = useCallback((sections: PaperSection[]) => {
+    if (!isTTSSupported) return;
+    speechSynthesis.cancel();
+
+    const doneSections = sections.filter((s) => s.status === 'done');
+    if (doneSections.length === 0) return;
+
+    const fullText = doneSections.map((s) => s.translated).join('.\n\n');
+    const utterance = new SpeechSynthesisUtterance(fullText);
+    utterance.lang = 'en-US';
+    utterance.rate = 0.92;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    const voices = speechSynthesis.getVoices();
+    const enVoices = voices.filter((v) => v.lang.startsWith('en'));
+    const localEn = enVoices.find((v) => v.localService);
+    if (localEn) utterance.voice = localEn;
+    else if (enVoices.length > 0) utterance.voice = enVoices[0];
+
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = () => setSpeakingId(null);
+
+    setSpeakingId('__all__');
+    speechSynthesis.speak(utterance);
+  }, []);
+
+  return { speak, stop, speakAll, speakingId, isTTSSupported };
+}
 
 /* ────────────────────────────────────────────
  * 상수
@@ -347,6 +416,26 @@ const QualityBadge = memo(function QualityBadge({
 });
 
 /* ────────────────────────────────────────────
+ * TTS 재생 버튼 아이콘
+ * ──────────────────────────────────────────── */
+
+function SpeakerIcon({ playing }: { playing: boolean }) {
+  if (playing) {
+    return (
+      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10 9v6m4-6v6" />
+      </svg>
+    );
+  }
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.536 8.464a5 5 0 010 7.072M17.95 6.05a8 8 0 010 11.9M6.5 8.788v6.424a.5.5 0 00.757.429l4.986-3.212a.5.5 0 000-.858L7.257 8.36a.5.5 0 00-.757.429z" />
+    </svg>
+  );
+}
+
+/* ────────────────────────────────────────────
  * 섹션 카드 (React.memo)
  * ──────────────────────────────────────────── */
 
@@ -355,21 +444,27 @@ const SectionCard = memo(function SectionCard({
   viewMode,
   studyMode,
   copiedId,
+  isSpeaking,
   onCopy,
   onRetry,
   onRequestStudy,
   onEditSection,
   onSetSectionType,
+  onSpeak,
+  onStopSpeak,
 }: {
   sec: PaperSection;
   viewMode: 'bilingual' | 'english';
   studyMode: boolean;
   copiedId: string | null;
+  isSpeaking: boolean;
   onCopy: (text: string, id: string) => void;
   onRetry: (id: string) => void;
   onRequestStudy: (id: string) => void;
   onEditSection: (id: string, newText: string) => void;
   onSetSectionType: (id: string, newType: PaperSection['type']) => void;
+  onSpeak: (text: string, id: string) => void;
+  onStopSpeak: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -422,6 +517,20 @@ const SectionCard = memo(function SectionCard({
                 학습 분석
               </button>
             )}
+          {/* TTS 재생 버튼 */}
+          {sec.status === 'done' && (
+            <button
+              onClick={() => isSpeaking ? onStopSpeak() : onSpeak(sec.translated, sec.id)}
+              className={`transition-colors ${
+                isSpeaking
+                  ? 'text-orange-500 hover:text-orange-600'
+                  : 'text-gray-400 hover:text-emerald-500 dark:hover:text-emerald-400'
+              }`}
+              title={isSpeaking ? '재생 중지' : '영어 듣기'}
+            >
+              <SpeakerIcon playing={isSpeaking} />
+            </button>
+          )}
           {sec.status === 'done' && (
             <button
               onClick={() => onCopy(sec.translated, sec.id)}
@@ -511,6 +620,8 @@ export default function TranslationResult({
   const [showSummary, setShowSummary] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
   const [bilingualDocx, setBilingualDocx] = useState(false);
+
+  const { speak, stop, speakAll, speakingId, isTTSSupported: ttsOk } = usePaperTTS();
 
   if (sections.length === 0) {
     return (
@@ -630,6 +741,22 @@ export default function TranslationResult({
         </div>
 
         <div className="flex gap-1.5 items-center flex-wrap">
+          {/* TTS 전체 듣기 */}
+          {ttsOk && (
+            <button
+              onClick={() => speakingId === '__all__' ? stop() : speakAll(sections)}
+              disabled={doneCount === 0}
+              className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] rounded-md transition-colors border ${
+                speakingId === '__all__'
+                  ? 'bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 border-orange-300 dark:border-orange-700 font-semibold'
+                  : 'text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+              } disabled:opacity-40`}
+            >
+              <SpeakerIcon playing={speakingId === '__all__'} />
+              {speakingId === '__all__' ? '중지' : '전체 듣기'}
+            </button>
+          )}
+
           <button
             onClick={handleStudyToggle}
             disabled={doneCount === 0}
@@ -716,11 +843,14 @@ export default function TranslationResult({
             viewMode={viewMode}
             studyMode={studyMode}
             copiedId={copiedId}
+            isSpeaking={speakingId === sec.id}
             onCopy={handleCopySection}
             onRetry={onRetry}
             onRequestStudy={onRequestStudy}
             onEditSection={onEditSection}
             onSetSectionType={onSetSectionType}
+            onSpeak={speak}
+            onStopSpeak={stop}
           />
         ))}
       </div>

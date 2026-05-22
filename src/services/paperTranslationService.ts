@@ -58,8 +58,9 @@ export function createThrottle(
 const translationCache = new Map<string, string>();
 const MAX_CACHE_SIZE = 100;
 
-function getCacheKey(text: string, field: string, tone: string): string {
-  return `${field}:${tone}:${text.slice(0, 200)}:${text.length}`;
+function getCacheKey(text: string, fields: string | string[], tone: string): string {
+  const fieldKey = Array.isArray(fields) ? fields.sort().join('+') : fields;
+  return `${fieldKey}:${tone}:${text.slice(0, 200)}:${text.length}`;
 }
 
 function getCached(key: string): string | undefined {
@@ -114,14 +115,18 @@ const SECTION_INSTRUCTIONS: Record<string, string> = {
 /**
  * 컨텍스트 연속 프롬프트 빌더
  * — 이전 번역 결과를 포함하여 용어 일관성 유지
+ * — 복수 학문 분야 지원
  */
 function buildSystemPrompt(
-  field: string,
+  fields: string | string[],
   tone: string,
   glossary?: Record<string, string>,
   previousTranslations?: string[],
 ): string {
-  const fieldLabel = FIELD_LABELS[field] || 'general academia';
+  const fieldArray = Array.isArray(fields) ? fields : [fields];
+  const fieldLabel = fieldArray.length > 1
+    ? fieldArray.map((f) => FIELD_LABELS[f] || f).join(', ')
+    : FIELD_LABELS[fieldArray[0]] || 'general academia';
   const toneGuide =
     tone === 'formal'
       ? 'Use formal academic register with discipline-specific terminology. Employ complex sentence structures where appropriate for precision.'
@@ -174,7 +179,7 @@ export async function translatePaperSectionStreaming(
   previousTranslations?: string[],
 ): Promise<PaperTranslateResponse> {
   // 캐시 확인
-  const cacheKey = getCacheKey(req.text, req.field, req.tone);
+  const cacheKey = getCacheKey(req.text, req.fields, req.tone);
   const cached = getCached(cacheKey);
   if (cached) {
     onToken(cached);
@@ -182,7 +187,7 @@ export async function translatePaperSectionStreaming(
   }
 
   const systemPrompt = buildSystemPrompt(
-    req.field,
+    req.fields,
     req.tone,
     req.glossary,
     previousTranslations,

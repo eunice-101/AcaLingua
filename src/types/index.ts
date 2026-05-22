@@ -125,7 +125,7 @@ export interface PaperSection {
 export interface PaperTranslateRequest {
   text: string;
   sectionType: PaperSection['type'];
-  field: AcademicField;
+  fields: AcademicField[];
   tone: AcademicTone;
   glossary?: Record<string, string>;
 }
@@ -141,7 +141,7 @@ export interface PaperTranslationRecord {
   id: string;
   timestamp: number;
   title: string;
-  field: AcademicField;
+  fields: AcademicField[];
   tone: AcademicTone;
   sections: PaperSection[];
   glossary: Record<string, string>;

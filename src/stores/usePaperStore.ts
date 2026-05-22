@@ -10,7 +10,7 @@ import { generateId } from '@/utils/uuid';
 
 interface PaperState {
   inputText: string;
-  field: AcademicField;
+  fields: AcademicField[];
   tone: AcademicTone;
   sections: PaperSection[];
   glossary: Record<string, string>;
@@ -28,7 +28,8 @@ interface PaperState {
   translationStartTime: number | null;
 
   setInputText: (text: string) => void;
-  setField: (field: AcademicField) => void;
+  setFields: (fields: AcademicField[]) => void;
+  toggleField: (field: AcademicField) => void;
   setTone: (tone: AcademicTone) => void;
   setSections: (sections: PaperSection[]) => void;
   updateSection: (id: string, partial: Partial<PaperSection>) => void;
@@ -57,7 +58,7 @@ export const usePaperStore = create<PaperState>()(
   persist(
     (set, get) => ({
       inputText: '',
-      field: 'general',
+      fields: ['general'],
       tone: 'accessible',
       sections: [],
       glossary: {},
@@ -71,7 +72,17 @@ export const usePaperStore = create<PaperState>()(
       translationStartTime: null,
 
       setInputText: (text) => set({ inputText: text }),
-      setField: (field) => set({ field }),
+      setFields: (fields) => set({ fields }),
+      toggleField: (field) =>
+        set((s) => {
+          const has = s.fields.includes(field);
+          if (has) {
+            // 최소 1개는 유지
+            if (s.fields.length <= 1) return s;
+            return { fields: s.fields.filter((f) => f !== field) };
+          }
+          return { fields: [...s.fields, field] };
+        }),
       setTone: (tone) => set({ tone }),
       setSections: (sections) => set({ sections }),
       updateSection: (id, partial) =>
@@ -108,14 +119,14 @@ export const usePaperStore = create<PaperState>()(
       setProgress: (val) => set({ progress: val }),
       setError: (err) => set({ error: err }),
       saveToHistory: () => {
-        const { sections, field, tone, glossary } = get();
+        const { sections, fields, tone, glossary } = get();
         if (sections.length === 0) return;
         const titleSection = sections.find((s) => s.type === 'title');
         const record: PaperTranslationRecord = {
           id: generateId(),
           timestamp: Date.now(),
           title: titleSection?.original || sections[0].original.slice(0, 50),
-          field,
+          fields,
           tone,
           sections: [...sections],
           glossary: { ...glossary },
@@ -125,7 +136,7 @@ export const usePaperStore = create<PaperState>()(
       loadFromHistory: (record) =>
         set({
           sections: record.sections,
-          field: record.field,
+          fields: record.fields,
           tone: record.tone,
           glossary: record.glossary,
           inputText: record.sections.map((s) => s.original).join('\n\n'),
@@ -152,7 +163,7 @@ export const usePaperStore = create<PaperState>()(
     {
       name: 'acalingua-paper',
       partialize: (state) => ({
-        field: state.field,
+        fields: state.fields,
         tone: state.tone,
         glossary: state.glossary,
         history: state.history,

@@ -46,7 +46,7 @@ type TabView = 'input' | 'result' | 'history';
 export default function PaperTranslatePage() {
   const {
     inputText, setInputText,
-    field, setField,
+    fields, toggleField,
     tone, setTone,
     sections, setSections, updateSection, editSectionTranslation, setSectionType,
     glossary,
@@ -90,7 +90,7 @@ export default function PaperTranslatePage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isTranslating, inputText, field, tone, glossary, ollamaModel]);
+  }, [isTranslating, inputText, fields, tone, glossary, ollamaModel]);
 
   /* ─── 컨텍스트 연속 + 쓰로틀 스트리밍 번역 ─── */
   const handleTranslate = useCallback(async () => {
@@ -150,7 +150,7 @@ export default function PaperTranslatePage() {
 
         if (chunks.length === 1) {
           const result = await translateWithRetry(
-            { text: sec.original, sectionType: sec.type, field, tone, glossary },
+            { text: sec.original, sectionType: sec.type, fields, tone, glossary },
             ollamaModel,
             throttle.call,
             controller.signal,
@@ -164,7 +164,7 @@ export default function PaperTranslatePage() {
             if (controller.signal.aborted) break;
             const prefix = completedText;
             const result = await translateWithRetry(
-              { text: chunks[c], sectionType: sec.type, field, tone, glossary },
+              { text: chunks[c], sectionType: sec.type, fields, tone, glossary },
               ollamaModel,
               (currentChunkText: string) => {
                 throttle.call(prefix + (prefix ? '\n\n' : '') + currentChunkText);
@@ -210,7 +210,7 @@ export default function PaperTranslatePage() {
       saveToHistory();
     }
   }, [
-    inputText, field, tone, glossary, ollamaModel,
+    inputText, fields, tone, glossary, ollamaModel,
     setError, setTranslating, setProgress, setSections, updateSection,
     saveToHistory, setAbortController, setTranslationSpeed, setTranslationStartTime,
   ]);
@@ -230,7 +230,7 @@ export default function PaperTranslatePage() {
 
       try {
         await translateWithRetry(
-          { text: sec.original, sectionType: sec.type, field, tone, glossary },
+          { text: sec.original, sectionType: sec.type, fields, tone, glossary },
           ollamaModel,
           throttle.call,
         );
@@ -241,7 +241,7 @@ export default function PaperTranslatePage() {
         updateSection(sectionId, { status: 'error', error: msg });
       }
     },
-    [field, tone, glossary, ollamaModel, updateSection],
+    [fields, tone, glossary, ollamaModel, updateSection],
   );
 
   const handleCopyAll = useCallback(() => {
@@ -377,31 +377,48 @@ export default function PaperTranslatePage() {
         {/* Input Tab */}
         {activeTab === 'input' && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400">학문 분야</label>
-                <select
-                  value={field}
-                  onChange={(e) => setField(e.target.value as AcademicField)}
-                  className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
-                >
-                  {FIELD_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
+            {/* 학문 분야 — 다중 선택 (토글 칩) */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                학문 분야 <span className="text-gray-400 font-normal">(복수 선택 가능)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {FIELD_OPTIONS.map((opt) => {
+                  const isSelected = fields.includes(opt.value);
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => toggleField(opt.value)}
+                      className={`px-3 py-1.5 text-xs rounded-full border transition-all ${
+                        isSelected
+                          ? 'bg-primary/10 dark:bg-accent/20 text-primary dark:text-accent border-primary/40 dark:border-accent/40 font-semibold'
+                          : 'bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      }`}
+                    >
+                      {isSelected && (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3 inline mr-0.5 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                      {opt.label}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400">번역 톤</label>
-                <select
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value as AcademicTone)}
-                  className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
-                >
-                  {TONE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
+            </div>
+
+            {/* 번역 톤 */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-500 dark:text-gray-400">번역 톤</label>
+              <select
+                value={tone}
+                onChange={(e) => setTone(e.target.value as AcademicTone)}
+                className="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
+              >
+                {TONE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
 
             <p className="text-[11px] text-gray-400 -mt-2">
