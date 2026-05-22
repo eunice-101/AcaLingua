@@ -53,7 +53,7 @@ export default function PaperHistory({ onSwitchToResult }: Props) {
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-[10px] text-gray-400">{formatDate(record.timestamp)}</span>
                   <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 rounded">
-                    {FIELD_LABELS[record.field] || record.field}
+                    {(record.fields ?? ['general']).map((f: string) => FIELD_LABELS[f] || f).join(', ')}
                   </span>
                   <span className="text-[10px] text-gray-400">
                     {doneCount}/{record.sections.length} 섹션
