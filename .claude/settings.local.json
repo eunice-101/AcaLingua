@@ -32,7 +32,9 @@
       "Bash(npm ls *)",
       "Bash(timeout 5)",
       "Bash(curl -s http://localhost:5173)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/paper)",
+      "Bash(curl -s http://localhost:5173/paper)"
     ]
   },
   "hooks": {
