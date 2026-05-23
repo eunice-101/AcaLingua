@@ -34,7 +34,10 @@
       "Bash(curl -s http://localhost:5173)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/paper)",
-      "Bash(curl -s http://localhost:5173/paper)"
+      "Bash(curl -s http://localhost:5173/paper)",
+      "Bash(ls \"C:\\\\Users\\\\10_17\\\\Desktop\\\\\" | findstr /i \"agent\")",
+      "Read(//mnt/c/Users/10_17/**)",
+      "Bash(dir \"C:\\\\Users\\\\10_17\\\\Desktop\")"
     ]
   },
   "hooks": {
