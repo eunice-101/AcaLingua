@@ -37,7 +37,9 @@
       "Bash(curl -s http://localhost:5173/paper)",
       "Bash(ls \"C:\\\\Users\\\\10_17\\\\Desktop\\\\\" | findstr /i \"agent\")",
       "Read(//mnt/c/Users/10_17/**)",
-      "Bash(dir \"C:\\\\Users\\\\10_17\\\\Desktop\")"
+      "Bash(dir \"C:\\\\Users\\\\10_17\\\\Desktop\")",
+      "Bash(pandoc \"C:/Users/10_17/Desktop/남아공/새 폴더/KYEYOUNG KIM \\(Kor\\) 이론추가.docx\" -t plain --wrap=none)",
+      "Bash(python3 -c ' *)"
     ]
   },
   "hooks": {
